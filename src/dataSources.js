@@ -62,33 +62,77 @@ async function loadDexScreenerCandidates(config) {
 }
 
 async function loadGmgnCandidates(config) {
-  const args = ["market", "trenches", "--chain", "sol", "--limit", String(config.candidateLimit), "--raw"];
+  const args = [...config.gmgnCliArgsPrefix, "market", "trenches", "--chain", "sol", "--limit", String(config.candidateLimit), "--raw"];
   for (const type of config.gmgnTypes) args.push("--type", type);
   for (const platform of config.gmgnPlatforms) args.push("--launchpad-platform", platform);
 
-  const json = await runJsonCommand(config.gmgnCliBin, args);
+  if (config.minMarketCapUsd) args.push("--min-marketcap", String(config.minMarketCapUsd));
+  if (config.maxMarketCapUsd) args.push("--max-marketcap", String(config.maxMarketCapUsd));
+  if (config.minLiquidityUsd) args.push("--min-liquidity", String(config.minLiquidityUsd));
+  if (config.maxRugRatio) args.push("--max-rug-ratio", String(config.maxRugRatio));
+
+  const json = await runJsonCommand(config.gmgnCliBin, args, gmgnEnv(config));
   const data = json.data || json;
   const buckets = [data.new_creation, data.pump, data.near_completion, data.completed, data.tokens].filter(Array.isArray);
-  return buckets.flat().map(normalizeGmgnCandidate).filter((candidate) => candidate.tokenAddress);
+  return dedupeCandidates(buckets.flat().map(normalizeGmgnCandidate).filter((candidate) => candidate.tokenAddress));
 }
 
 async function loadTrackerHits(config) {
-  if (!config.trackerFile) return new Map();
-  const raw = await readFile(config.trackerFile, "utf8");
+  const hits = new Map();
+  if (config.trackerFile) mergeHitMaps(hits, await loadTrackerFile(config.trackerFile));
+  if (config.trackerSource === "gmgn-smartmoney") mergeHitMaps(hits, await loadGmgnSmartMoneyHits(config));
+  return hits;
+}
+
+async function loadTrackerFile(filePath) {
+  const raw = await readFile(filePath, "utf8");
   const parsed = JSON.parse(raw);
   const rows = Array.isArray(parsed) ? parsed : Object.entries(parsed).map(([tokenAddress, value]) => ({ tokenAddress, ...value }));
   const hits = new Map();
-  for (const row of rows) {
-    const tokenAddress = row.tokenAddress || row.address || row.mint;
-    if (!tokenAddress) continue;
-    const wallets = Array.isArray(row.wallets) ? row.wallets : [];
-    hits.set(tokenAddress, {
-      trackedWalletHits: numeric(row.trackedWalletHits ?? row.hits ?? wallets.length),
-      trackedWalletValueUsd: numeric(row.trackedWalletValueUsd ?? row.valueUsd ?? row.usdValue),
-      trackedWallets: wallets,
-    });
-  }
+  for (const row of rows) addTrackerHit(hits, row);
   return hits;
+}
+
+async function loadGmgnSmartMoneyHits(config) {
+  const args = [...config.gmgnCliArgsPrefix, "track", "smartmoney", "--chain", "sol", "--limit", String(config.trackerLimit), "--side", "buy", "--raw"];
+  const json = await runJsonCommand(config.gmgnCliBin, args, gmgnEnv(config));
+  const rows = Array.isArray(json.data) ? json.data : Array.isArray(json) ? json : [];
+  const hits = new Map();
+  for (const row of rows) addTrackerHit(hits, normalizeTrackerTrade(row));
+  return hits;
+}
+
+function normalizeTrackerTrade(row) {
+  const token = row.token || row.to_token || row.buy_token || {};
+  const wallet = row.wallet || row.wallet_address || row.address || row.trader || row.maker || "gmgn-smartmoney";
+  return {
+    tokenAddress: token.address || row.token_address || row.to_token_address || row.contract_address || row.mint,
+    valueUsd: row.usd_value || row.value_usd || row.amount_usd || row.total_usd,
+    wallets: [wallet].filter(Boolean),
+  };
+}
+
+function addTrackerHit(hits, row) {
+  const tokenAddress = row.tokenAddress || row.address || row.mint;
+  if (!tokenAddress) return;
+  const wallets = Array.isArray(row.wallets) ? row.wallets.map(String).filter(Boolean) : [];
+  const current = hits.get(tokenAddress) || { trackedWalletHits: 0, trackedWalletValueUsd: 0, trackedWallets: [] };
+  const walletSet = new Set([...current.trackedWallets, ...wallets]);
+  const explicitHits = numeric(row.trackedWalletHits ?? row.hits);
+  hits.set(tokenAddress, {
+    trackedWalletHits: Math.max(current.trackedWalletHits, explicitHits || walletSet.size),
+    trackedWalletValueUsd: current.trackedWalletValueUsd + numeric(row.trackedWalletValueUsd ?? row.valueUsd ?? row.usdValue),
+    trackedWallets: [...walletSet],
+  });
+}
+
+function mergeHitMaps(target, source) {
+  for (const [tokenAddress, hit] of source.entries()) addTrackerHit(target, {
+    tokenAddress,
+    trackedWalletHits: hit.trackedWalletHits,
+    trackedWalletValueUsd: hit.trackedWalletValueUsd,
+    wallets: hit.trackedWallets,
+  });
 }
 
 function mergeTrackerHits(candidate, trackerHits) {
@@ -123,9 +167,9 @@ async function fetchRugcheckReport(tokenAddress) {
   }
 }
 
-export function runJsonCommand(command, args) {
+export function runJsonCommand(command, args, env = {}) {
   return new Promise((resolve, reject) => {
-    const child = spawn(command, args, { stdio: ["ignore", "pipe", "pipe"] });
+    const child = spawn(command, args, { env: { ...process.env, ...env }, stdio: ["ignore", "pipe", "pipe"] });
     let stdout = "";
     let stderr = "";
     child.stdout.on("data", (chunk) => {
@@ -147,6 +191,13 @@ export function runJsonCommand(command, args) {
       }
     });
   });
+}
+
+function gmgnEnv(config) {
+  const env = {};
+  if (config.gmgnApiKey) env.GMGN_API_KEY = config.gmgnApiKey;
+  if (config.gmgnPrivateKey) env.GMGN_PRIVATE_KEY = config.gmgnPrivateKey;
+  return env;
 }
 
 function normalizeDexScreenerCandidate(profile, pair, adSet, boost) {
@@ -183,16 +234,16 @@ function normalizeGmgnCandidate(item) {
     tokenAddress,
     symbol: item.symbol || item.token_symbol || item.name || tokenAddress,
     name: item.name || item.token_name || item.symbol || tokenAddress,
-    priceUsd: numeric(item.price || item.price_usd || item.usd_price),
+    priceUsd: numeric(item.price || item.price_usd || item.usd_price) || priceFromMarketCap(item),
     priceReferenceUsd: numeric(item.avg_price_1h || item.reference_price || item.vwap_1h),
     liquidityUsd: numeric(item.liquidity || item.liquidity_usd || item.pool_liquidity || item.usd_liquidity),
-    marketCapUsd: numeric(item.market_cap || item.marketcap || item.mc || item.fdv),
-    volumeM5Usd: numeric(item.volume_5m || item.volume5m || item.volume),
-    volumeH1Usd: numeric(item.volume_1h || item.volume1h || item.volume),
+    marketCapUsd: numeric(item.market_cap || item.usd_market_cap || item.marketcap || item.mc || item.fdv),
+    volumeM5Usd: numeric(item.volume_5m || item.volume5m || item.volume) || numeric(item.volume_24h),
+    volumeH1Usd: numeric(item.volume_1h || item.volume1h || item.volume) || numeric(item.volume_24h),
     priceChangeM5Pct: numeric(item.change5m || item.price_change_5m || item.price_change_m5),
     priceChangeH1Pct: numeric(item.change1h || item.price_change_1h || item.price_change_h1),
-    buys5m: numeric(item.buys_5m || item.buy_count_5m || item.buys || item.swaps_5m_buy),
-    sells5m: numeric(item.sells_5m || item.sell_count_5m || item.sells || item.swaps_5m_sell),
+    buys5m: numeric(item.buys_5m || item.buy_count_5m || item.buys || item.swaps_5m_buy) || numeric(item.buys_24h),
+    sells5m: numeric(item.sells_5m || item.sell_count_5m || item.sells || item.swaps_5m_sell) || numeric(item.sells_24h),
     pairAgeMs: ageMsFromTimestamp(item.creation_timestamp || item.open_timestamp || item.created_at),
     dexPaid: Boolean(item.dex_paid || item.has_dex_ad || item.is_dex_paid),
     boostActive: numeric(item.hot_level || item.boosts || item.boost_active),
@@ -214,6 +265,15 @@ function normalizeGmgnCandidate(item) {
       gmgn: `https://gmgn.ai/sol/token/${tokenAddress}`,
     },
   });
+}
+
+function dedupeCandidates(candidates) {
+  const byToken = new Map();
+  for (const candidate of candidates) {
+    const current = byToken.get(candidate.tokenAddress);
+    if (!current || candidate.trackedWalletHits > current.trackedWalletHits) byToken.set(candidate.tokenAddress, candidate);
+  }
+  return [...byToken.values()];
 }
 
 function baseCandidate(candidate) {
@@ -286,6 +346,12 @@ function mockCandidates() {
       security: { renouncedMint: true, renouncedFreeze: true, topHolderPct: 8, top10HolderPct: 29 },
     }),
   ];
+}
+
+function priceFromMarketCap(item) {
+  const marketCapUsd = numeric(item.market_cap || item.usd_market_cap || item.fdv);
+  const supply = numeric(item.total_supply || item.supply || item.circulating_supply);
+  return marketCapUsd > 0 && supply > 0 ? marketCapUsd / supply : 0;
 }
 
 function ageMsFromTimestamp(timestamp) {
