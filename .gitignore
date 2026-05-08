@@ -4,3 +4,6 @@ node_modules/
 !.env.example
 .DS_Store
 npm-debug.log*
+.trenches-paper-state.json
+.trenches-paper-smoke.json
+.trenches-forward-smoke.json

@@ -7,9 +7,13 @@
   "scripts": {
     "scan": "node src/index.js scan",
     "execute": "node src/index.js execute",
+    "backtest": "TRENCHES_BANKROLL_USD=500 node src/index.js backtest",
+    "paper": "TRENCHES_SOURCE=mock TRENCHES_BANKROLL_USD=500 TRENCHES_PAPER_STATE_FILE=.trenches-paper-smoke.json node src/index.js paper",
+    "forward-test": "TRENCHES_SOURCE=mock TRENCHES_BANKROLL_USD=500 TRENCHES_FORWARD_TEST_CYCLES=2 TRENCHES_SCAN_INTERVAL_MS=100 TRENCHES_PAPER_STATE_FILE=.trenches-forward-smoke.json node src/index.js forward-test",
+    "gmgn:validate": "TRENCHES_SOURCE=gmgn TRENCHES_TRACKER_SOURCE=gmgn-smartmoney TRENCHES_USE_RUGCHECK=false TRENCHES_OUTPUT_LIMIT=5 node src/index.js scan",
     "smoke": "TRENCHES_SOURCE=mock TRENCHES_BANKROLL_USD=500 node src/index.js execute",
     "test": "node --test",
-    "check": "node --check src/config.js && node --check src/dataSources.js && node --check src/executor.js && node --check src/index.js && node --check src/strategy.js && node --test"
+    "check": "node --check src/backtest.js && node --check src/config.js && node --check src/dataSources.js && node --check src/executor.js && node --check src/index.js && node --check src/paper.js && node --check src/risk.js && node --check src/strategy.js && node --test"
   },
   "keywords": [
     "solana",

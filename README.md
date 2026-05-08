@@ -26,6 +26,18 @@ npm run smoke
 
 `npm run smoke` uses deterministic mock candidates and never submits a trade.
 
+Additional verification modes:
+
+```bash
+npm run backtest
+npm run paper
+npm run forward-test
+```
+
+- `backtest` replays a JSON historical snapshot file or the built-in deterministic sample.
+- `paper` opens/closes simulated positions and writes local PnL state.
+- `forward-test` repeats paper mode for several cycles without live execution.
+
 ## Scan
 
 ```bash
@@ -38,13 +50,20 @@ Default source is DexScreener plus RugCheck. DexScreener does not provide wallet
 
 ```bash
 TRENCHES_SOURCE=gmgn npm run scan
+npm run gmgn:validate
 ```
 
-The GMGN mode expects `gmgn-cli` to be installed and authenticated outside this repo.
+GMGN mode uses `npx -y gmgn-cli` by default and reads credentials from `GMGN_API_KEY`, `GMGN_PRIVATE_KEY`, or `GMGN_LIVE_AUTH_CONFIG`. Query-only validation needs an API key; live swap requires API key, private key, and `GMGN_WALLET_ADDRESS`.
 
-## Wallet tracker file
+## Wallet tracker inputs
 
-You can inject tracked-wallet hits from a local JSON file:
+This repo includes a small public seed list at `data/public-tracked-wallets.json` from public GMGN/KolQuest wallet tables. For live signal confirmation, prefer GMGN Smart Money trade records:
+
+```bash
+TRENCHES_SOURCE=gmgn TRENCHES_TRACKER_SOURCE=gmgn-smartmoney npm run scan
+```
+
+You can also inject tracked-wallet hits from a local JSON file:
 
 ```json
 {
@@ -81,7 +100,9 @@ TRENCHES_LIVE_RISK_ACK=I_UNDERSTAND_NO_PROFIT_GUARANTEE \
 npm run execute
 ```
 
-The command sends a GMGN CLI buy only after the candidate is `EXECUTE_READY`. Keep API keys, wallets, and private keys out of this repo.
+The command sends a GMGN CLI swap only after the candidate is `EXECUTE_READY`, and only when API key, private key, wallet address, and risk acknowledgement are present. Keep API keys, wallets, and private keys out of this repo.
+
+Paper/backtest modes enforce the configured stop-loss, take-profit, and trailing-stop rules locally so PnL can be monitored before live trading.
 
 ## Important env vars
 

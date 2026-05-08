@@ -4,6 +4,7 @@ export function loadConfig(env = process.env) {
     mode: env.TRENCHES_MODE || "scan",
     scanOnce: boolEnv(env, "TRENCHES_SCAN_ONCE", true),
     scanIntervalMs: numberEnv(env, "TRENCHES_SCAN_INTERVAL_MS", 15000),
+    forwardTestCycles: numberEnv(env, "TRENCHES_FORWARD_TEST_CYCLES", 3),
     candidateLimit: numberEnv(env, "TRENCHES_CANDIDATE_LIMIT", 30),
     outputLimit: numberEnv(env, "TRENCHES_OUTPUT_LIMIT", 10),
     startingBankrollUsd: numberEnv(env, "TRENCHES_BANKROLL_USD", 100),
@@ -35,6 +36,8 @@ export function loadConfig(env = process.env) {
     allowBoostedTokens: boolEnv(env, "TRENCHES_ALLOW_BOOSTED_TOKENS", false),
     trackedWallets: listEnv(env, "TRACKED_WALLETS"),
     trackerFile: env.TRENCHES_TRACKER_FILE || "",
+    trackerSource: env.TRENCHES_TRACKER_SOURCE || "file",
+    trackerLimit: numberEnv(env, "TRENCHES_TRACKER_LIMIT", 100),
     minTrackedWalletHits: numberEnv(env, "TRENCHES_MIN_TRACKED_WALLET_HITS", 2),
     minTrackedWalletValueUsd: numberEnv(env, "TRENCHES_MIN_TRACKED_WALLET_VALUE_USD", 0),
     requireBelowReference: boolEnv(env, "TRENCHES_REQUIRE_BELOW_REFERENCE", true),
@@ -53,10 +56,32 @@ export function loadConfig(env = process.env) {
     executeTrades: boolEnv(env, "TRENCHES_EXECUTE", false),
     executor: env.TRENCHES_EXECUTOR || "dry-run",
     liveRiskAck: env.TRENCHES_LIVE_RISK_ACK || "",
-    gmgnCliBin: env.GMGN_CLI_BIN || "gmgn-cli",
+    gmgnCliBin: env.GMGN_CLI_BIN || "npx",
+    gmgnCliArgsPrefix: listEnv(env, "GMGN_CLI_ARGS_PREFIX", ["-y", "gmgn-cli"]),
     gmgnTypes: listEnv(env, "GMGN_TRENCHES_TYPES", ["new_creation", "near_completion", "completed"]),
     gmgnPlatforms: listEnv(env, "GMGN_TRENCHES_PLATFORMS"),
+    gmgnApiKey: gmgnAuth(env).apiKey,
+    gmgnPrivateKey: gmgnAuth(env).privateKey,
+    gmgnWalletAddress: env.GMGN_WALLET_ADDRESS || "",
+    historicalFile: env.TRENCHES_HISTORICAL_FILE || "",
+    paperStateFile: env.TRENCHES_PAPER_STATE_FILE || ".trenches-paper-state.json",
+    publicTrackerFile: env.TRENCHES_PUBLIC_TRACKER_FILE || "data/public-tracked-wallets.json",
   };
+}
+
+function gmgnAuth(env) {
+  const raw = env.GMGN_LIVE_AUTH_CONFIG || "";
+  let apiKey = env.GMGN_API_KEY || "";
+  let privateKey = env.GMGN_PRIVATE_KEY || "";
+  if (!raw) return { apiKey, privateKey };
+  try {
+    const parsed = JSON.parse(raw);
+    apiKey = apiKey || parsed.GMGN_API_KEY || parsed.apiKey || parsed.api_key || parsed.token || "";
+    privateKey = privateKey || parsed.GMGN_PRIVATE_KEY || parsed.privateKey || parsed.private_key || "";
+  } catch {
+    apiKey = apiKey || raw;
+  }
+  return { apiKey, privateKey };
 }
 
 export function numberEnv(env, name, fallback) {
