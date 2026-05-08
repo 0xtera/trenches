@@ -1,6 +1,11 @@
 import test from "node:test";
 import assert from "node:assert/strict";
+import { mkdtemp, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { runBacktest } from "../src/backtest.js";
 import { loadConfig } from "../src/config.js";
+import { runPaperTrading } from "../src/paper.js";
 import { openPaperPosition, applyExitRules, summarizePositions } from "../src/risk.js";
 
 const config = loadConfig({ TRENCHES_BANKROLL_USD: "500" });
@@ -34,3 +39,64 @@ test("summary flags 10 percent loss budget breach", () => {
   assert.equal(breached.lossBudgetBreached, true);
   assert.equal(breached.maxLossUsd, 50);
 });
+
+test("backtest treats zero price as stop-loss event", async () => {
+  const dir = await mkdtemp(join(tmpdir(), "trenches-backtest-"));
+  const historicalFile = join(dir, "history.json");
+  const tokenAddress = "ZeroPrice111111111111111111111111111111111";
+  await writeFile(historicalFile, JSON.stringify([
+    { timestamp: "2026-05-08T00:00:00.000Z", prices: { [tokenAddress]: 1 }, candidates: [candidate(tokenAddress)] },
+    { timestamp: "2026-05-08T00:01:00.000Z", prices: { [tokenAddress]: 0 }, candidates: [] },
+  ]));
+
+  const backtest = await runBacktest(loadConfig({ TRENCHES_BANKROLL_USD: "500", TRENCHES_HISTORICAL_FILE: historicalFile }));
+  assert.equal(backtest.positions[0].status, "CLOSED");
+  assert.equal(backtest.positions[0].exitReason, "STOP_LOSS");
+  assert.equal(backtest.positions[0].currentPriceUsd, 0);
+});
+
+test("paper trading sizes entries against accumulated paper losses", async () => {
+  const dir = await mkdtemp(join(tmpdir(), "trenches-paper-"));
+  const paperStateFile = join(dir, "state.json");
+  await writeFile(paperStateFile, JSON.stringify({ positions: [{ status: "CLOSED", realizedPnlUsd: -49, unrealizedPnlUsd: 0 }] }));
+
+  const paper = await runPaperTrading(loadConfig({
+    TRENCHES_SOURCE: "mock",
+    TRENCHES_BANKROLL_USD: "500",
+    TRENCHES_OUTPUT_LIMIT: "1",
+    TRENCHES_PAPER_STATE_FILE: paperStateFile,
+    TRENCHES_PRIORITY_FEE_SOL: "0",
+    TRENCHES_NETWORK_FEE_SOL: "0",
+  }));
+
+  assert.equal(paper.decisions[0].position.remainingLossBudgetUsd, 1);
+  assert.equal(paper.decisions[0].position.riskUsd, 1);
+  assert.ok(paper.decisions[0].position.sizeUsd < 25);
+});
+
+function candidate(tokenAddress) {
+  return {
+    source: "test",
+    tokenAddress,
+    symbol: "ZERO",
+    name: "Zero Price",
+    priceUsd: 1,
+    priceReferenceUsd: 1.25,
+    liquidityUsd: 18000,
+    marketCapUsd: 85000,
+    volumeM5Usd: 6500,
+    volumeH1Usd: 42000,
+    priceChangeM5Pct: -3.5,
+    priceChangeH1Pct: -11,
+    buys5m: 32,
+    sells5m: 18,
+    pairAgeMs: 12 * 60 * 1000,
+    dexPaid: false,
+    boostActive: 0,
+    trackedWalletHits: 3,
+    trackedWalletValueUsd: 900,
+    trackedWallets: ["wallet-a", "wallet-b", "wallet-c"],
+    security: { renouncedMint: true, renouncedFreeze: true, topHolderPct: 9, top10HolderPct: 31 },
+    links: {},
+  };
+}

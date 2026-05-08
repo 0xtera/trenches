@@ -12,7 +12,7 @@ export async function runBacktest(config = loadConfig()) {
   for (const snapshot of snapshots) {
     for (const position of positions) {
       if (position.status !== "OPEN") continue;
-      const priceUsd = snapshot.prices?.[position.tokenAddress] || position.currentPriceUsd;
+      const priceUsd = snapshot.prices?.[position.tokenAddress] ?? position.currentPriceUsd;
       const updated = applyExitRules(position, priceUsd, snapshot.timestamp);
       Object.assign(position, updated);
     }

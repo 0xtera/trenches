@@ -2,19 +2,23 @@ import { readFile, writeFile } from "node:fs/promises";
 import { loadConfig } from "./config.js";
 import { loadCandidates } from "./dataSources.js";
 import { openPaperPosition, applyExitRules, summarizePositions } from "./risk.js";
-import { scoreCandidates } from "./strategy.js";
+import { evaluateCandidate } from "./strategy.js";
 
 export async function runPaperTrading(config = loadConfig()) {
   const state = await readPaperState(config.paperStateFile);
   const candidates = await loadCandidates(config);
   const priceByToken = new Map(candidates.map((candidate) => [candidate.tokenAddress, candidate.priceUsd]));
   const updatedPositions = state.positions.map((position) => {
-    const priceUsd = priceByToken.get(position.tokenAddress) || position.currentPriceUsd;
+    const priceUsd = priceByToken.get(position.tokenAddress) ?? position.currentPriceUsd;
     return applyExitRules(position, priceUsd);
   });
 
   const openTokens = new Set(updatedPositions.filter((position) => position.status === "OPEN").map((position) => position.tokenAddress));
-  const results = scoreCandidates(candidates, config).slice(0, config.outputLimit);
+  const remainingLossBudgetUsd = paperRemainingLossBudgetUsd(updatedPositions, config);
+  const results = candidates
+    .map((candidate) => evaluateCandidate(candidate, config, remainingLossBudgetUsd))
+    .sort((a, b) => b.score - a.score)
+    .slice(0, config.outputLimit);
   for (const result of results) {
     if (result.decision !== "EXECUTE_READY") continue;
     if (openTokens.has(result.token.address)) continue;
@@ -42,6 +46,12 @@ export async function readPaperState(filePath) {
     if (error.code === "ENOENT") return { positions: [] };
     throw error;
   }
+}
+
+function paperRemainingLossBudgetUsd(positions, config) {
+  const maxLossUsd = (config.startingBankrollUsd * config.maxLossBudgetBps) / 10000;
+  const realizedPaperLossUsd = Math.abs(Math.min(0, positions.reduce((sum, position) => sum + (position.realizedPnlUsd || 0), 0)));
+  return Math.max(0, maxLossUsd - Math.max(0, config.realizedLossUsd) - realizedPaperLossUsd);
 }
 
 async function writePaperState(filePath, state) {
