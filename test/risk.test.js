@@ -26,12 +26,34 @@ test("paper position closes at take profit", () => {
   assert.ok(closed.realizedPnlUsd > 0);
 });
 
+test("paper position harvests partial profit before full exit", () => {
+  const opened = openPaperPosition(result(), config, "2026-05-08T00:00:00.000Z");
+  const partial = applyExitRules(opened, 1.21, "2026-05-08T00:05:00.000Z");
+  assert.equal(partial.status, "OPEN");
+  assert.equal(partial.partialTakeProfitTaken, true);
+  assert.equal(partial.remainingQuantity, 12.5);
+  assert.ok(partial.realizedPnlUsd > 0);
+
+  const closed = applyExitRules(partial, 1.31, "2026-05-08T00:10:00.000Z");
+  assert.equal(closed.status, "CLOSED");
+  assert.equal(closed.exitReason, "TAKE_PROFIT");
+  assert.ok(closed.realizedPnlUsd > partial.realizedPnlUsd);
+});
+
 test("paper position closes at stop loss", () => {
   const opened = openPaperPosition(result(), config, "2026-05-08T00:00:00.000Z");
   const closed = applyExitRules(opened, 0.84, "2026-05-08T00:05:00.000Z");
   assert.equal(closed.status, "CLOSED");
   assert.equal(closed.exitReason, "STOP_LOSS");
   assert.ok(closed.realizedPnlUsd < 0);
+});
+
+test("paper position closes after configured max hold time", () => {
+  const holdConfig = loadConfig({ TRENCHES_BANKROLL_USD: "500", TRENCHES_MAX_HOLD_MS: "60000" });
+  const opened = openPaperPosition(result(), holdConfig, "2026-05-08T00:00:00.000Z");
+  const closed = applyExitRules(opened, 1.01, "2026-05-08T00:01:01.000Z");
+  assert.equal(closed.status, "CLOSED");
+  assert.equal(closed.exitReason, "MAX_HOLD");
 });
 
 test("summary flags 10 percent loss budget breach", () => {
@@ -72,6 +94,66 @@ test("paper trading sizes entries against accumulated paper losses", async () =>
   assert.equal(paper.decisions[0].position.remainingLossBudgetUsd, 1);
   assert.equal(paper.decisions[0].position.riskUsd, 1);
   assert.ok(paper.decisions[0].position.sizeUsd < 25);
+});
+
+test("paper trading respects max open position cap", async () => {
+  const dir = await mkdtemp(join(tmpdir(), "trenches-paper-max-open-"));
+  const paperStateFile = join(dir, "state.json");
+  const open = openPaperPosition(result(), config, "2026-05-08T00:00:00.000Z");
+  await writeFile(paperStateFile, JSON.stringify({ positions: [open] }));
+
+  const paper = await runPaperTrading(loadConfig({
+    TRENCHES_SOURCE: "mock",
+    TRENCHES_BANKROLL_USD: "500",
+    TRENCHES_MAX_OPEN_POSITIONS: "1",
+    TRENCHES_OUTPUT_LIMIT: "1",
+    TRENCHES_PAPER_STATE_FILE: paperStateFile,
+    TRENCHES_PRIORITY_FEE_SOL: "0",
+    TRENCHES_NETWORK_FEE_SOL: "0",
+  }));
+
+  assert.equal(paper.positions.length, 1);
+  assert.equal(paper.summary.openPositions, 1);
+});
+
+test("paper trading hydrates legacy open positions with new exit rules", async () => {
+  const dir = await mkdtemp(join(tmpdir(), "trenches-paper-hydrate-"));
+  const paperStateFile = join(dir, "state.json");
+  await writeFile(paperStateFile, JSON.stringify({
+    positions: [{
+      tokenAddress: "MockLowCap1111111111111111111111111111111",
+      symbol: "LOW",
+      status: "OPEN",
+      openedAt: "2026-05-08T00:00:00.000Z",
+      entryPriceUsd: 0.0008,
+      currentPriceUsd: 0.0008,
+      highestPriceUsd: 0.0008,
+      sizeUsd: 25,
+      quantity: 31250,
+      stopLossPct: 15,
+      takeProfitPct: 30,
+      trailingStopPct: 12,
+      stopLossPriceUsd: 0.00068,
+      takeProfitPriceUsd: 0.00104,
+      trailingStopPriceUsd: 0.000704,
+      realizedPnlUsd: 0,
+      unrealizedPnlUsd: 0,
+    }],
+  }));
+
+  const paper = await runPaperTrading(loadConfig({
+    TRENCHES_SOURCE: "mock",
+    TRENCHES_BANKROLL_USD: "500",
+    TRENCHES_MAX_HOLD_MS: "1",
+    TRENCHES_OUTPUT_LIMIT: "1",
+    TRENCHES_PAPER_STATE_FILE: paperStateFile,
+    TRENCHES_PRIORITY_FEE_SOL: "0",
+    TRENCHES_NETWORK_FEE_SOL: "0",
+  }));
+
+  assert.equal(paper.positions[0].status, "CLOSED");
+  assert.equal(paper.positions[0].exitReason, "MAX_HOLD");
+  assert.equal(paper.positions[0].partialTakeProfitPct, 20);
 });
 
 function candidate(tokenAddress) {

@@ -9,11 +9,13 @@ export async function runPaperTrading(config = loadConfig()) {
   const candidates = await loadCandidates(config);
   const priceByToken = new Map(candidates.map((candidate) => [candidate.tokenAddress, candidate.priceUsd]));
   const updatedPositions = state.positions.map((position) => {
-    const priceUsd = priceByToken.get(position.tokenAddress) ?? position.currentPriceUsd;
-    return applyExitRules(position, priceUsd);
+    const hydrated = hydratePaperPosition(position, config);
+    const priceUsd = priceByToken.get(hydrated.tokenAddress) ?? hydrated.currentPriceUsd;
+    return applyExitRules(hydrated, priceUsd);
   });
 
   const openTokens = new Set(updatedPositions.filter((position) => position.status === "OPEN").map((position) => position.tokenAddress));
+  let openPositionCount = openTokens.size;
   const remainingLossBudgetUsd = paperRemainingLossBudgetUsd(updatedPositions, config);
   const results = candidates
     .map((candidate) => evaluateCandidate(candidate, config, remainingLossBudgetUsd))
@@ -22,10 +24,12 @@ export async function runPaperTrading(config = loadConfig()) {
   for (const result of results) {
     if (result.decision !== "EXECUTE_READY") continue;
     if (openTokens.has(result.token.address)) continue;
+    if (openPositionCount >= config.maxOpenPositions) break;
     if (summarizePositions(updatedPositions, config).lossBudgetBreached) break;
     const position = openPaperPosition(result, config);
     updatedPositions.push(position);
     openTokens.add(position.tokenAddress);
+    openPositionCount += 1;
   }
 
   const nextState = {
@@ -52,6 +56,28 @@ function paperRemainingLossBudgetUsd(positions, config) {
   const maxLossUsd = (config.startingBankrollUsd * config.maxLossBudgetBps) / 10000;
   const realizedPaperLossUsd = Math.abs(Math.min(0, positions.reduce((sum, position) => sum + (position.realizedPnlUsd || 0), 0)));
   return Math.max(0, maxLossUsd - Math.max(0, config.realizedLossUsd) - realizedPaperLossUsd);
+}
+
+function hydratePaperPosition(position, config) {
+  const partialTakeProfitPct = position.partialTakeProfitPct ?? (config.partialTakeProfitBps || 0) / 100;
+  const partialTakeProfitSizePct = position.partialTakeProfitSizePct ?? (config.partialTakeProfitSizeBps || 0) / 100;
+  const entryPriceUsd = position.entryPriceUsd || position.currentPriceUsd || 0;
+  const quantity = position.quantity ?? (entryPriceUsd > 0 ? (position.sizeUsd || 0) / entryPriceUsd : 0);
+  return {
+    ...position,
+    quantity,
+    remainingQuantity: position.remainingQuantity ?? quantity,
+    partialTakeProfitPct,
+    partialTakeProfitSizePct,
+    partialTakeProfitTaken: position.partialTakeProfitTaken ?? false,
+    partialTakeProfitPriceUsd: position.partialTakeProfitPriceUsd || priceAt(entryPriceUsd, partialTakeProfitPct),
+    maxHoldMs: position.maxHoldMs ?? config.maxHoldMs ?? 0,
+  };
+}
+
+function priceAt(entryPriceUsd, pctChange) {
+  if (!entryPriceUsd || !pctChange) return 0;
+  return Math.round(entryPriceUsd * (1 + pctChange / 100) * 1_000_000_000_000) / 1_000_000_000_000;
 }
 
 async function writePaperState(filePath, state) {

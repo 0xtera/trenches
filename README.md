@@ -11,10 +11,11 @@ The bot only marks a candidate as `EXECUTE_READY` when all configured safety gat
 - Low-cap range: default `$5k` to `$250k` market cap.
 - Ponyin-style total fee survival: GMGN/platform fee, protocol fee, priority fee, and Solana network fee must stay below hard-fee and round-trip caps.
 - Wallet tracker confirmation: at least `TRENCHES_MIN_TRACKED_WALLET_HITS=2` tracked wallets must be detected.
+- Signal overlap: at least `TRENCHES_MIN_SIGNAL_OVERLAP=4` independent confirmations must agree before execution.
 - Price below reference: avoids chasing pumps by requiring a reference discount or negative 5m/1h price location.
 - Organic confirmation: minimum 5m buys and buy/sell ratio.
 - Security gates: mint/freeze authority, holder concentration, bundled launch exposure, rat traders, rug ratio, wash trading, honeypot flags.
-- Money management: default 10% session max-loss budget, 1% risk per trade, position caps, liquidity-impact cap, stop loss, take profit, and trailing stop.
+- Money management: default 10% session max-loss budget, 1% risk per trade, position caps, max-open-position cap, liquidity-impact cap, partial take profit, stop loss, take profit, and trailing stop.
 
 ## Quick start
 
@@ -102,7 +103,7 @@ npm run execute
 
 The command sends a GMGN CLI swap only after the candidate is `EXECUTE_READY`, and only when API key, private key, wallet address, and risk acknowledgement are present. Keep API keys, wallets, and private keys out of this repo.
 
-Paper/backtest modes enforce the configured stop-loss, take-profit, and trailing-stop rules locally so PnL can be monitored before live trading.
+Paper/backtest modes enforce the configured partial take-profit, stop-loss, take-profit, trailing-stop, max-hold, and max-open-position rules locally so PnL can be monitored before live trading.
 
 ## PM2 long-running mode
 
@@ -138,5 +139,8 @@ Copy `.env.example` and tune:
 - `TRENCHES_MAX_MARKET_CAP_USD=250000` keeps focus on low-cap trenches.
 - `TRENCHES_MAX_HARD_FEE_BPS=250` and `TRENCHES_MAX_ROUND_TRIP_HARD_FEE_BPS=500` keep total fees survivable.
 - `TRENCHES_MIN_TRACKED_WALLET_HITS=2` requires multiple wallet tracker entries.
+- `TRENCHES_MIN_SIGNAL_OVERLAP=4` requires multiple confirmations instead of one weak signal.
+- `TRENCHES_MAX_OPEN_POSITIONS=3` caps paper/backtest portfolio concentration.
+- `TRENCHES_PARTIAL_TAKE_PROFIT_BPS=2000` and `TRENCHES_PARTIAL_TAKE_PROFIT_SIZE_BPS=5000` harvest half after +20% by default.
 - `TRENCHES_REQUIRE_BELOW_REFERENCE=true` avoids buying after price is already extended.
 - `TRENCHES_PRIORITY_FEE_SOL` should stay low enough that fixed fees do not dominate small positions.

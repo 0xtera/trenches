@@ -22,6 +22,7 @@ export async function runBacktest(config = loadConfig()) {
       const result = evaluateCandidate(candidate, config, remainingLossBudgetUsd);
       if (result.decision !== "EXECUTE_READY") continue;
       if (positions.some((position) => position.tokenAddress === result.token.address)) continue;
+      if (openPositionCount(positions) >= config.maxOpenPositions) break;
       positions.push(openPaperPosition(result, config, snapshot.timestamp));
     }
     realizedLossUsd = Math.abs(Math.min(0, positions.reduce((sum, position) => sum + (position.realizedPnlUsd || 0), 0)));
@@ -33,6 +34,10 @@ export async function runBacktest(config = loadConfig()) {
     summary: summarizePositions(positions, config),
     positions,
   };
+}
+
+function openPositionCount(positions) {
+  return positions.filter((position) => position.status === "OPEN").length;
 }
 
 async function loadHistoricalSnapshots(filePath) {

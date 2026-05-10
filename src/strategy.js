@@ -61,8 +61,15 @@ export function evaluateCandidate(candidate, config, remainingLossBudgetUsd) {
   if (security.renouncedFreeze) confirmations.push("freeze authority renounced");
   if (candidate.volumeH1Usd > candidate.liquidityUsd && candidate.liquidityUsd > 0) confirmations.push("volume/liquidity shows active flow");
 
+  const signalOverlap = {
+    count: confirmations.length,
+    min: config.minSignalOverlap,
+    labels: confirmations,
+  };
+  if (signalOverlap.count < signalOverlap.min) rejects.push("not enough independent signal overlap");
+
   const eligiblePosition = rejects.length === 0 ? position : emptyPosition(config, remainingLossBudgetUsd);
-  const score = scoreCandidate(candidate, { rejects, warnings, confirmations, security, fees, price });
+  const score = scoreCandidate(candidate, { rejects, warnings, confirmations, signalOverlap, security, fees, price });
   const decision = rejects.length === 0 && score >= 75 && eligiblePosition.sizeUsd > 0 ? "EXECUTE_READY" : "SKIP";
 
   return {
@@ -89,11 +96,12 @@ export function evaluateCandidate(candidate, config, remainingLossBudgetUsd) {
       trackedWalletHits: candidate.trackedWalletHits,
       trackedWalletValueUsd: candidate.trackedWalletValueUsd,
       trackedWallets: candidate.trackedWallets,
+      signalOverlap: signalOverlap.count,
       dexPaid: candidate.dexPaid,
       boostActive: candidate.boostActive,
     },
     position: eligiblePosition,
-    checks: { rejects, warnings, confirmations, security, fees, price },
+    checks: { rejects, warnings, confirmations, signalOverlap, security, fees, price },
     links: candidate.links,
     source: candidate.source,
   };
@@ -141,6 +149,8 @@ function scoreCandidate(candidate, checks) {
   if (candidate.trackedWalletHits >= 2) score += 14;
   if (checks.fees.safe) score += 12;
   if (checks.price.belowReference) score += 10;
+  if (checks.signalOverlap.count >= checks.signalOverlap.min) score += 8;
+  else score -= (checks.signalOverlap.min - checks.signalOverlap.count) * 6;
   if (checks.security.renouncedMint) score += 5;
   if (checks.security.renouncedFreeze) score += 3;
   if (candidate.dexPaid) score -= 4;
@@ -164,6 +174,9 @@ export function planPosition(candidate, config, remainingLossBudgetUsd, eligible
     stopLossPct: config.stopLossBps / 100,
     takeProfitPct: config.takeProfitBps / 100,
     trailingStopPct: config.trailingStopBps / 100,
+    partialTakeProfitPct: config.partialTakeProfitBps / 100,
+    partialTakeProfitSizePct: config.partialTakeProfitSizeBps / 100,
+    maxHoldMinutes: config.maxHoldMs > 0 ? round(config.maxHoldMs / 60000, 1) : 0,
     remainingLossBudgetUsd: roundUsd(remainingLossBudgetUsd),
     maxSessionLossUsd: roundUsd((config.startingBankrollUsd * config.maxLossBudgetBps) / 10000),
   };
@@ -176,6 +189,9 @@ function emptyPosition(config, remainingLossBudgetUsd) {
     stopLossPct: config.stopLossBps / 100,
     takeProfitPct: config.takeProfitBps / 100,
     trailingStopPct: config.trailingStopBps / 100,
+    partialTakeProfitPct: config.partialTakeProfitBps / 100,
+    partialTakeProfitSizePct: config.partialTakeProfitSizeBps / 100,
+    maxHoldMinutes: config.maxHoldMs > 0 ? round(config.maxHoldMs / 60000, 1) : 0,
     remainingLossBudgetUsd: roundUsd(remainingLossBudgetUsd),
     maxSessionLossUsd: roundUsd((config.startingBankrollUsd * config.maxLossBudgetBps) / 10000),
   };
