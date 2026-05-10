@@ -64,7 +64,7 @@ function buildOrder(result, config) {
     links: result.links,
     exitPlan: {
       stopLossPriceUsd: priceAt(result.metrics.priceUsd, -result.position.stopLossPct),
-      partialTakeProfitPriceUsd: priceAt(result.metrics.priceUsd, result.position.partialTakeProfitPct || 0),
+      partialTakeProfitPriceUsd: result.position.partialTakeProfitPct > 0 ? priceAt(result.metrics.priceUsd, result.position.partialTakeProfitPct) : 0,
       takeProfitPriceUsd: priceAt(result.metrics.priceUsd, result.position.takeProfitPct),
       trailingStopPct: result.position.trailingStopPct,
     },
