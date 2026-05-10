@@ -14,6 +14,7 @@ export async function runPaperTrading(config = loadConfig()) {
   });
 
   const openTokens = new Set(updatedPositions.filter((position) => position.status === "OPEN").map((position) => position.tokenAddress));
+  let openPositionCount = openTokens.size;
   const remainingLossBudgetUsd = paperRemainingLossBudgetUsd(updatedPositions, config);
   const results = candidates
     .map((candidate) => evaluateCandidate(candidate, config, remainingLossBudgetUsd))
@@ -22,10 +23,12 @@ export async function runPaperTrading(config = loadConfig()) {
   for (const result of results) {
     if (result.decision !== "EXECUTE_READY") continue;
     if (openTokens.has(result.token.address)) continue;
+    if (openPositionCount >= config.maxOpenPositions) break;
     if (summarizePositions(updatedPositions, config).lossBudgetBreached) break;
     const position = openPaperPosition(result, config);
     updatedPositions.push(position);
     openTokens.add(position.tokenAddress);
+    openPositionCount += 1;
   }
 
   const nextState = {

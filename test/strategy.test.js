@@ -60,6 +60,13 @@ test("requires multiple tracked wallets before execution", () => {
   assert.ok(result.checks.rejects.includes("not enough tracked wallets entered"));
 });
 
+test("requires configured independent signal overlap before execution", () => {
+  const result = evaluateCandidate(candidate(), { ...baseConfig, minSignalOverlap: 7 }, 10);
+  assert.equal(result.decision, "SKIP");
+  assert.equal(result.checks.signalOverlap.count, 6);
+  assert.ok(result.checks.rejects.includes("not enough independent signal overlap"));
+});
+
 test("rejects extended price instead of chasing pump", () => {
   const result = evaluateCandidate(candidate({ priceReferenceUsd: 0, priceChangeM5Pct: 22, priceChangeH1Pct: 55 }), baseConfig, 10);
   assert.equal(result.decision, "SKIP");
