@@ -104,6 +104,32 @@ The command sends a GMGN CLI swap only after the candidate is `EXECUTE_READY`, a
 
 Paper/backtest modes enforce the configured stop-loss, take-profit, and trailing-stop rules locally so PnL can be monitored before live trading.
 
+## PM2 long-running mode
+
+Do not run one-shot scripts under PM2 without continuous mode: PM2 will restart the finished process until it becomes `errored`. Use the included ecosystem config instead.
+
+```bash
+cp .env.example .env
+# edit .env first; keep TRENCHES_EXECUTE=false unless you are intentionally live trading
+npm run pm2:scan
+npm run pm2:logs -- trenches-scan --lines 100
+```
+
+For continuous paper trading with persistent local PnL state:
+
+```bash
+npm run pm2:paper
+npm run pm2:logs -- trenches-paper --lines 100
+```
+
+Stop both PM2 apps with:
+
+```bash
+npm run pm2:stop
+```
+
+The PM2 apps force `TRENCHES_SCAN_ONCE=false` and keep execution disabled by default. The bot also auto-loads `.env` or `TRENCHES_ENV_FILE` at startup, without overriding environment variables already exported by PM2 or the shell.
+
 ## Important env vars
 
 Copy `.env.example` and tune:

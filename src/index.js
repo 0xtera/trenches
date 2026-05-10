@@ -17,14 +17,11 @@ async function main() {
     return;
   }
   if (config.mode === "paper") {
-    console.log(JSON.stringify(await runPaperTrading(config)));
+    await runPaperLoop(config);
     return;
   }
   if (config.mode === "forward-test") {
-    for (let cycle = 0; cycle < config.forwardTestCycles; cycle += 1) {
-      console.log(JSON.stringify({ cycle: cycle + 1, ...(await runPaperTrading(config)) }));
-      if (cycle + 1 < config.forwardTestCycles) await delay(config.scanIntervalMs);
-    }
+    await runForwardTest(config);
     return;
   }
 
@@ -41,6 +38,22 @@ async function main() {
     }
     if (!config.scanOnce) await delay(config.scanIntervalMs);
   } while (!config.scanOnce);
+}
+
+async function runPaperLoop(config) {
+  do {
+    console.log(JSON.stringify(await runPaperTrading(config)));
+    if (!config.scanOnce) await delay(config.scanIntervalMs);
+  } while (!config.scanOnce);
+}
+
+async function runForwardTest(config) {
+  let cycle = 0;
+  while (config.forwardTestCycles <= 0 || cycle < config.forwardTestCycles) {
+    cycle += 1;
+    console.log(JSON.stringify({ cycle, ...(await runPaperTrading(config)) }));
+    if (config.forwardTestCycles <= 0 || cycle < config.forwardTestCycles) await delay(config.scanIntervalMs);
+  }
 }
 
 main().catch((error) => {
