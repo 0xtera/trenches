@@ -15,6 +15,7 @@ export async function loadCandidates(config) {
 async function loadRawCandidates(config) {
   if (config.source === "mock") return mockCandidates();
   if (config.source === "gmgn") return loadGmgnCandidates(config);
+  if (["charon", "charon-signal", "signal-server"].includes(config.source)) return loadCharonSignalCandidates(config);
   return loadDexScreenerCandidates(config);
 }
 
@@ -75,6 +76,24 @@ async function loadGmgnCandidates(config) {
   const data = json.data || json;
   const buckets = [data.new_creation, data.pump, data.near_completion, data.completed, data.tokens].filter(Array.isArray);
   return dedupeCandidates(buckets.flat().map(normalizeGmgnCandidate).filter((candidate) => candidate.tokenAddress));
+}
+
+async function loadCharonSignalCandidates(config) {
+  if (!config.signalServerUrl) throw new Error("SIGNAL_SERVER_URL is required for TRENCHES_SOURCE=charon-signal");
+  const url = new URL("/api/signals", config.signalServerUrl);
+  url.searchParams.set("limit", String(Math.min(config.signalServerLimit, config.candidateLimit * 4)));
+  url.searchParams.set("minSources", String(config.signalServerMinSources));
+  const headers = config.signalServerKey ? { "x-api-key": config.signalServerKey } : {};
+  const json = await fetchJson(url.toString(), { headers });
+  return dedupeCandidates(signalRows(json).map(normalizeCharonSignalCandidate).filter((candidate) => candidate.tokenAddress)).slice(0, config.candidateLimit);
+}
+
+function signalRows(json) {
+  if (Array.isArray(json)) return json;
+  if (Array.isArray(json?.signals)) return json.signals;
+  if (Array.isArray(json?.data?.signals)) return json.data.signals;
+  if (Array.isArray(json?.data)) return json.data;
+  return [];
 }
 
 async function loadTrackerHits(config) {
@@ -147,11 +166,11 @@ function mergeTrackerHits(candidate, trackerHits) {
   };
 }
 
-async function fetchJson(url) {
+async function fetchJson(url, init = {}) {
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), 15000);
   try {
-    const response = await fetch(url, { signal: controller.signal });
+    const response = await fetch(url, { ...init, signal: controller.signal });
     if (!response.ok) throw new Error(`${url} returned ${response.status}`);
     return await response.json();
   } finally {
@@ -267,6 +286,56 @@ function normalizeGmgnCandidate(item) {
   });
 }
 
+function normalizeCharonSignalCandidate(signal) {
+  const tokenAddress = signal.mint || signal.address || signal.tokenAddress || signal.token_address || signal.contract_address;
+  const trending = signal.trending || {};
+  const graduated = signal.graduated || {};
+  const priceUsd = numeric(firstValue(signal.priceUsd, signal.price_usd, trending.price, graduated.priceUsd));
+  const distanceFromAthPct = numeric(firstValue(graduated.distanceFromAthPercent, signal.distanceFromAthPercent, signal.athDistancePct));
+  const trackedWallets = arrayValue(firstValue(signal.smartWallets, signal.smart_wallets, signal.wallets, trending.smart_wallets, trending.wallets));
+  const smartDegenCount = numeric(firstValue(signal.smartDegenCount, signal.smart_degen_count, trending.smartDegenCount, trending.smart_degen_count));
+  return baseCandidate({
+    source: "charon-signal",
+    tokenAddress,
+    symbol: signal.symbol || signal.ticker || trending.symbol || graduated.ticker || tokenAddress,
+    name: signal.name || trending.name || graduated.name || signal.symbol || tokenAddress,
+    priceUsd,
+    priceReferenceUsd: numeric(firstValue(signal.priceReferenceUsd, signal.reference_price, signal.avgPrice1h, signal.avg_price_1h, graduated.athPriceUsd)) || referenceFromAthDistance(priceUsd, distanceFromAthPct),
+    liquidityUsd: numeric(firstValue(signal.liquidityUsd, signal.liquidity_usd, trending.liquidity, graduated.liquidityUsd)),
+    marketCapUsd: numeric(firstValue(signal.marketCapUsd, signal.market_cap_usd, signal.marketCap, trending.market_cap, graduated.marketCap)),
+    volumeM5Usd: numeric(firstValue(signal.volume5m, signal.volumeM5Usd, signal.volume_5m, trending.volume5m, trending.volume_5m, trending.volume)),
+    volumeH1Usd: numeric(firstValue(signal.volume1h, signal.volumeH1Usd, signal.volume_1h, signal.volume24h, trending.volume1h, trending.volume_1h, trending.volume)),
+    priceChangeM5Pct: numeric(firstValue(signal.priceChange5m, signal.priceChangeM5Pct, signal.price_change_5m, trending.price_change_5m)),
+    priceChangeH1Pct: numeric(firstValue(signal.priceChange1h, signal.priceChangeH1Pct, signal.price_change_1h, trending.price_change_1h, distanceFromAthPct)),
+    buys5m: numeric(firstValue(signal.buys5m, signal.buyCount5m, signal.buys_5m, trending.buys, trending.buys_5m)),
+    sells5m: numeric(firstValue(signal.sells5m, signal.sellCount5m, signal.sells_5m, trending.sells, trending.sells_5m)),
+    pairAgeMs: numeric(firstValue(signal.ageMs, signal.pairAgeMs)) || ageMsFromTimestamp(firstValue(signal.createdAt, signal.created_at, signal.creation_timestamp)),
+    trackedWalletHits: numeric(firstValue(signal.trackedWalletHits, signal.tracked_wallet_hits, smartDegenCount, trackedWallets.length)),
+    trackedWalletValueUsd: numeric(firstValue(signal.trackedWalletValueUsd, signal.tracked_wallet_value_usd, signal.smartMoneyValueUsd, signal.smart_money_value_usd)),
+    trackedWallets,
+    security: {
+      renouncedMint: asBoolean(firstValue(signal.renouncedMint, signal.renounced_mint, signal.security?.renouncedMint, signal.security?.renounced_mint)),
+      renouncedFreeze: asBoolean(firstValue(signal.renouncedFreeze, signal.renounced_freeze, signal.security?.renouncedFreeze, signal.security?.renounced_freeze)),
+      topHolderPct: pct(firstValue(signal.topHolderPct, signal.top_holder_pct, signal.security?.topHolderPct)),
+      top10HolderPct: pct(firstValue(signal.top10HolderPct, signal.top_10_holder_pct, signal.security?.top10HolderPct)),
+      devHoldPct: pct(firstValue(signal.devHoldPct, signal.dev_hold_pct, signal.security?.devHoldPct)),
+      bundlerRate: numeric(firstValue(signal.bundlerRate, signal.bundler_rate, trending.bundler_rate)),
+      ratTraderRate: numeric(firstValue(signal.ratTraderRate, signal.rat_trader_amount_rate, trending.rat_trader_amount_rate)),
+      rugRatio: numeric(firstValue(signal.rugRatio, signal.rug_ratio, trending.rug_ratio)),
+      isWashTrading: asBoolean(firstValue(signal.isWashTrading, signal.is_wash_trading, trending.is_wash_trading)),
+      isHoneypot: asBoolean(firstValue(signal.isHoneypot, signal.is_honeypot, trending.is_honeypot)),
+    },
+    links: {
+      gmgn: `https://gmgn.ai/sol/token/${tokenAddress}`,
+    },
+  });
+}
+
+function referenceFromAthDistance(priceUsd, distanceFromAthPct) {
+  if (priceUsd <= 0 || distanceFromAthPct >= 0 || distanceFromAthPct <= -99) return 0;
+  return priceUsd / (1 + distanceFromAthPct / 100);
+}
+
 function dedupeCandidates(candidates) {
   const byToken = new Map();
   for (const candidate of candidates) {
@@ -365,6 +434,10 @@ function arrayValue(value) {
   if (Array.isArray(value)) return value.filter(Boolean).map(String);
   if (!value) return [];
   return String(value).split(",").map((item) => item.trim()).filter(Boolean);
+}
+
+function firstValue(...values) {
+  return values.find((value) => value !== undefined && value !== null && value !== "");
 }
 
 function numeric(value) {
