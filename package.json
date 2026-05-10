@@ -11,6 +11,7 @@
     "paper": "TRENCHES_SOURCE=mock TRENCHES_BANKROLL_USD=500 TRENCHES_PAPER_STATE_FILE=.trenches-paper-smoke.json node src/index.js paper",
     "forward-test": "TRENCHES_SOURCE=mock TRENCHES_BANKROLL_USD=500 TRENCHES_FORWARD_TEST_CYCLES=2 TRENCHES_SCAN_INTERVAL_MS=100 TRENCHES_PAPER_STATE_FILE=.trenches-forward-smoke.json node src/index.js forward-test",
     "gmgn:validate": "TRENCHES_SOURCE=gmgn TRENCHES_TRACKER_SOURCE=gmgn-smartmoney TRENCHES_USE_RUGCHECK=false TRENCHES_OUTPUT_LIMIT=5 node src/index.js scan",
+    "charon:validate": "TRENCHES_SOURCE=charon-signal TRENCHES_USE_RUGCHECK=false TRENCHES_OUTPUT_LIMIT=5 node src/index.js scan",
     "pm2:scan": "npx -y pm2 start ecosystem.config.cjs --only trenches-scan",
     "pm2:paper": "npx -y pm2 start ecosystem.config.cjs --only trenches-paper",
     "pm2:logs": "npx -y pm2 logs",

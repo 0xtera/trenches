@@ -47,7 +47,7 @@ npm run scan
 
 Default source is DexScreener plus RugCheck. DexScreener does not provide wallet tracker entries, so real execution-ready signals usually require GMGN data or a tracker file.
 
-## GMGN source
+## GMGN and Charon sources
 
 ```bash
 TRENCHES_SOURCE=gmgn npm run scan
@@ -55,6 +55,17 @@ npm run gmgn:validate
 ```
 
 GMGN mode uses `npx -y gmgn-cli` by default and reads credentials from `GMGN_API_KEY`, `GMGN_PRIVATE_KEY`, or `GMGN_LIVE_AUTH_CONFIG`. Query-only validation needs an API key; live swap requires API key, private key, and `GMGN_WALLET_ADDRESS`.
+
+Charon signal-server mode is optional and still runs every Charon signal through Trenches safety gates:
+
+```bash
+SIGNAL_SERVER_URL=https://api.thecharon.xyz \
+SIGNAL_SERVER_KEY=... \
+TRENCHES_SOURCE=charon-signal \
+npm run scan
+```
+
+Use `npm run charon:validate` after setting `SIGNAL_SERVER_URL` and `SIGNAL_SERVER_KEY`. Keep the key in `.env` or Devin secrets, not in git.
 
 ## Wallet tracker inputs
 
