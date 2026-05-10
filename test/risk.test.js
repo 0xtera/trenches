@@ -116,6 +116,46 @@ test("paper trading respects max open position cap", async () => {
   assert.equal(paper.summary.openPositions, 1);
 });
 
+test("paper trading hydrates legacy open positions with new exit rules", async () => {
+  const dir = await mkdtemp(join(tmpdir(), "trenches-paper-hydrate-"));
+  const paperStateFile = join(dir, "state.json");
+  await writeFile(paperStateFile, JSON.stringify({
+    positions: [{
+      tokenAddress: "MockLowCap1111111111111111111111111111111",
+      symbol: "LOW",
+      status: "OPEN",
+      openedAt: "2026-05-08T00:00:00.000Z",
+      entryPriceUsd: 0.0008,
+      currentPriceUsd: 0.0008,
+      highestPriceUsd: 0.0008,
+      sizeUsd: 25,
+      quantity: 31250,
+      stopLossPct: 15,
+      takeProfitPct: 30,
+      trailingStopPct: 12,
+      stopLossPriceUsd: 0.00068,
+      takeProfitPriceUsd: 0.00104,
+      trailingStopPriceUsd: 0.000704,
+      realizedPnlUsd: 0,
+      unrealizedPnlUsd: 0,
+    }],
+  }));
+
+  const paper = await runPaperTrading(loadConfig({
+    TRENCHES_SOURCE: "mock",
+    TRENCHES_BANKROLL_USD: "500",
+    TRENCHES_MAX_HOLD_MS: "1",
+    TRENCHES_OUTPUT_LIMIT: "1",
+    TRENCHES_PAPER_STATE_FILE: paperStateFile,
+    TRENCHES_PRIORITY_FEE_SOL: "0",
+    TRENCHES_NETWORK_FEE_SOL: "0",
+  }));
+
+  assert.equal(paper.positions[0].status, "CLOSED");
+  assert.equal(paper.positions[0].exitReason, "MAX_HOLD");
+  assert.equal(paper.positions[0].partialTakeProfitPct, 20);
+});
+
 function candidate(tokenAddress) {
   return {
     source: "test",
